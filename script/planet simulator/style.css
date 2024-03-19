@@ -1,0 +1,83 @@
+/* General styles for the body and text */
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+  }
+  
+  h1, h2 {
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  
+  h1 {
+    font-size: 40px;
+    text-align: center;
+  }
+  
+  h2 {
+    font-size: 25px;
+  }
+  
+  p {
+    line-height: 1.5;
+    margin-bottom: 10px;
+    text-align: center;
+  }
+  
+  /* Styles for code blocks */
+  code {
+    font-family: monospace;
+    background-color: #f5f5f5;
+    padding: 5px;
+    border-radius: 3px;
+    white-space: pre-wrap;
+  }
+  
+  /* Styles for lists */
+  ul, ol {
+    margin: 0 20px;
+    padding: 0;
+    list-style: none;
+  }
+  ul img {
+    width: 40%;      /* Adjust image width as needed */
+    height: auto;      /* Maintain aspect ratio */
+    margin-right: 10px; /* Add some space between image and text */
+    border: 1px solid #ddd;  /* Optional border */
+  }
+  
+  li {
+    font-size: 17.5px;
+    max-width: 600px;
+  }
+  
+  /* Styles for tables (if you use them) */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+  }
+  
+  td, th {
+    border: 1px solid #ddd;
+    padding: 5px;
+    text-align: left;
+  }
+  
+  th {
+    font-weight: bold;
+  }
+  .btn {
+    display: inline-block; /* Ensure proper display as a button */
+    padding: 10px 20px; /* Adjust padding for desired size */
+    background-color: #007bff; /* Blue background */
+    color: #fff; /* White text */
+    border: none; /* Remove default border */
+    border-radius: 5px; /* Rounded corners */
+    text-decoration: none; /* Remove underline from link */
+    cursor: pointer; /* Indicate interactivity */
+  }
+  
+  /* Hover effect for visual feedback */
+  .btn:hover {
+    background-color: #0069d9; /* Darker blue on hover */
+  }

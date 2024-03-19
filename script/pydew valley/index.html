@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h2>comming soon</h2>
+    <!--
+    <h2>level.py</h2>
+    <pre><code>
+import pygame 
+from settings import *
+from player import Player
+from overlay import Overlay
+from sprites import Generic, Water, WildFlower, Tree, Interaction, Particle
+from pytmx.util_pygame import load_pygame
+from support import *
+from transition import Transition
+from soil import SoilLayer
+from sky import Rain, Sky
+from random import randint
+from menu import Menu
+
+class Level:
+	def __init__(self):
+
+		# get the display surface
+		self.display_surface = pygame.display.get_surface()
+
+		# sprite groups
+		self.all_sprites = CameraGroup()
+		self.collision_sprites = pygame.sprite.Group()
+		self.tree_sprites = pygame.sprite.Group()
+		self.interaction_sprites = pygame.sprite.Group()
+
+		self.soil_layer = SoilLayer(self.all_sprites, self.collision_sprites)
+		self.setup()
+		self.overlay = Overlay(self.player)
+		self.transition = Transition(self.reset, self.player)
+
+		# sky
+		self.rain = Rain(self.all_sprites)
+		self.raining = randint(0,10) > 7
+		self.soil_layer.raining = self.raining
+		self.sky = Sky()
+
+		# shop
+		self.menu = Menu(self.player, self.toggle_shop)
+		self.shop_active = False
+
+		# music
+		self.success = pygame.mixer.Sound('../audio/success.wav')
+		self.success.set_volume(0.3)
+		self.music = pygame.mixer.Sound('../audio/music.mp3')
+		self.music.play(loops = -1)
+
+	def setup(self):
+		tmx_data = load_pygame('../data/map.tmx')
+
+		# house 
+		for layer in ['HouseFloor', 'HouseFurnitureBottom']:
+			for x, y, surf in tmx_data.get_layer_by_name(layer).tiles():
+				Generic((x * TILE_SIZE,y * TILE_SIZE), surf, self.all_sprites, LAYERS['house bottom'])
+
+		for layer in ['HouseWalls', 'HouseFurnitureTop']:
+			for x, y, surf in tmx_data.get_layer_by_name(layer).tiles():
+				Generic((x * TILE_SIZE,y * TILE_SIZE), surf, self.all_sprites)
+
+		# Fence
+		for x, y, surf in tmx_data.get_layer_by_name('Fence').tiles():
+			Generic((x * TILE_SIZE,y * TILE_SIZE), surf, [self.all_sprites, self.collision_sprites])
+
+		# water 
+		water_frames = import_folder('../graphics/water')
+		for x, y, surf in tmx_data.get_layer_by_name('Water').tiles():
+			Water((x * TILE_SIZE,y * TILE_SIZE), water_frames, self.all_sprites)
+
+		# trees 
+		for obj in tmx_data.get_layer_by_name('Trees'):
+			Tree(
+				pos = (obj.x, obj.y), 
+				surf = obj.image, 
+				groups = [self.all_sprites, self.collision_sprites, self.tree_sprites], 
+				name = obj.name,
+				player_add = self.player_add)
+
+		# wildflowers 
+		for obj in tmx_data.get_layer_by_name('Decoration'):
+			WildFlower((obj.x, obj.y), obj.image, [self.all_sprites, self.collision_sprites])
+
+		# collion tiles
+		for x, y, surf in tmx_data.get_layer_by_name('Collision').tiles():
+			Generic((x * TILE_SIZE, y * TILE_SIZE), pygame.Surface((TILE_SIZE, TILE_SIZE)), self.collision_sprites)
+
+		# Player 
+		for obj in tmx_data.get_layer_by_name('Player'):
+			if obj.name == 'Start':
+				self.player = Player(
+					pos = (obj.x,obj.y), 
+					group = self.all_sprites, 
+					collision_sprites = self.collision_sprites,
+					tree_sprites = self.tree_sprites,
+					interaction = self.interaction_sprites,
+					soil_layer = self.soil_layer,
+					toggle_shop = self.toggle_shop)
+			
+			if obj.name == 'Bed':
+				Interaction((obj.x,obj.y), (obj.width,obj.height), self.interaction_sprites, obj.name)
+
+			if obj.name == 'Trader':
+				Interaction((obj.x,obj.y), (obj.width,obj.height), self.interaction_sprites, obj.name)
+
+
+		Generic(
+			pos = (0,0),
+			surf = pygame.image.load('../graphics/world/ground.png').convert_alpha(),
+			groups = self.all_sprites,
+			z = LAYERS['ground'])
+
+	def player_add(self,item):
+
+		self.player.item_inventory[item] += 1
+		self.success.play()
+
+	def toggle_shop(self):
+
+		self.shop_active = not self.shop_active
+
+	def reset(self):
+		# plants
+		self.soil_layer.update_plants()
+
+		# soil
+		self.soil_layer.remove_water()
+		self.raining = randint(0,10) > 7
+		self.soil_layer.raining = self.raining
+		if self.raining:
+			self.soil_layer.water_all()
+
+		# apples on the trees
+		for tree in self.tree_sprites.sprites():
+			for apple in tree.apple_sprites.sprites():
+				apple.kill()
+			tree.create_fruit()
+
+		# sky
+		self.sky.start_color = [255,255,255]
+
+	def plant_collision(self):
+		if self.soil_layer.plant_sprites:
+			for plant in self.soil_layer.plant_sprites.sprites():
+				if plant.harvestable and plant.rect.colliderect(self.player.hitbox):
+					self.player_add(plant.plant_type)
+					plant.kill()
+					Particle(plant.rect.topleft, plant.image, self.all_sprites, z = LAYERS['main'])
+					self.soil_layer.grid[plant.rect.centery // TILE_SIZE][plant.rect.centerx // TILE_SIZE].remove('P')
+
+	def run(self,dt):
+		
+		# drawing logic
+		self.display_surface.fill('black')
+		self.all_sprites.custom_draw(self.player)
+		
+		# updates
+		if self.shop_active:
+			self.menu.update()
+		else:
+			self.all_sprites.update(dt)
+			self.plant_collision()
+
+		# weather
+		self.overlay.display()
+		if self.raining and not self.shop_active:
+			self.rain.update()
+		self.sky.display(dt)
+
+		# transition overlay
+		if self.player.sleep:
+			self.transition.play()
+
+class CameraGroup(pygame.sprite.Group):
+	def __init__(self):
+		super().__init__()
+		self.display_surface = pygame.display.get_surface()
+		self.offset = pygame.math.Vector2()
+
+	def custom_draw(self, player):
+		self.offset.x = player.rect.centerx - SCREEN_WIDTH / 2
+		self.offset.y = player.rect.centery - SCREEN_HEIGHT / 2
+
+		for layer in LAYERS.values():
+			for sprite in sorted(self.sprites(), key = lambda sprite: sprite.rect.centery):
+				if sprite.z == layer:
+					offset_rect = sprite.rect.copy()
+					offset_rect.center -= self.offset
+					self.display_surface.blit(sprite.image, offset_rect)
+
+					# # anaytics
+					# if sprite == player:
+					# 	pygame.draw.rect(self.display_surface,'red',offset_rect,5)
+					# 	hitbox_rect = player.hitbox.copy()
+					# 	hitbox_rect.center = offset_rect.center
+					# 	pygame.draw.rect(self.display_surface,'green',hitbox_rect,5)
+					# 	target_pos = offset_rect.center + PLAYER_TOOL_OFFSET[player.status.split('_')[0]]
+					# 	pygame.draw.circle(self.display_surface,'blue',target_pos,5)
+    </code></pre>
+
+    <h2>menu.py</h2>
+    <pre><code>
+import pygame
+from settings import *
+from timer import Timer
+
+class Menu:
+	def __init__(self, player, toggle_menu):
+
+		# general setup
+		self.player = player
+		self.toggle_menu = toggle_menu
+		self.display_surface = pygame.display.get_surface()
+		self.font = pygame.font.Font('../font/LycheeSoda.ttf', 30)
+
+		# options
+		self.width = 400
+		self.space = 10
+		self.padding = 8
+
+		# entries
+		self.options = list(self.player.item_inventory.keys()) + list(self.player.seed_inventory.keys())
+		self.sell_border = len(self.player.item_inventory) - 1
+		self.setup()
+
+		# movement
+		self.index = 0
+		self.timer = Timer(200)
+
+	def display_money(self):
+		text_surf = self.font.render(f'${self.player.money}', False, 'Black')
+		text_rect = text_surf.get_rect(midbottom = (SCREEN_WIDTH / 2,SCREEN_HEIGHT - 20))
+
+		pygame.draw.rect(self.display_surface,'White',text_rect.inflate(10,10),0,4)
+		self.display_surface.blit(text_surf,text_rect)
+
+	def setup(self):
+
+		# create the text surfaces
+		self.text_surfs = []
+		self.total_height = 0
+
+		for item in self.options:
+			text_surf = self.font.render(item, False, 'Black')
+			self.text_surfs.append(text_surf)
+			self.total_height += text_surf.get_height() + (self.padding * 2)
+
+		self.total_height += (len(self.text_surfs) - 1) * self.space
+		self.menu_top = SCREEN_HEIGHT / 2 - self.total_height / 2
+		self.main_rect = pygame.Rect(SCREEN_WIDTH / 2 - self.width / 2,self.menu_top,self.width,self.total_height)
+
+		# buy / sell text surface
+		self.buy_text = self.font.render('buy',False,'Black')
+		self.sell_text =  self.font.render('sell',False,'Black')
+
+	def input(self):
+		keys = pygame.key.get_pressed()
+		self.timer.update()
+
+		if keys[pygame.K_ESCAPE]:
+			self.toggle_menu()
+
+		if not self.timer.active:
+			if keys[pygame.K_UP]:
+				self.index -= 1
+				self.timer.activate()
+
+			if keys[pygame.K_DOWN]:
+				self.index += 1
+				self.timer.activate()
+
+			if keys[pygame.K_SPACE]:
+				self.timer.activate()
+
+				# get item
+				current_item = self.options[self.index]
+
+				# sell
+				if self.index <= self.sell_border:
+					if self.player.item_inventory[current_item] > 0:
+						self.player.item_inventory[current_item] -= 1
+						self.player.money += SALE_PRICES[current_item]
+
+				# buy
+				else:
+					seed_price = PURCHASE_PRICES[current_item]
+					if self.player.money >= seed_price:
+						self.player.seed_inventory[current_item] += 1
+						self.player.money -= PURCHASE_PRICES[current_item]
+
+		# clamo the values
+		if self.index < 0:
+			self.index = len(self.options) - 1
+		if self.index > len(self.options) - 1:
+			self.index = 0
+
+	def show_entry(self, text_surf, amount, top, selected):
+
+		# background
+		bg_rect = pygame.Rect(self.main_rect.left,top,self.width,text_surf.get_height() + (self.padding * 2))
+		pygame.draw.rect(self.display_surface, 'White',bg_rect, 0, 4)
+
+		# text
+		text_rect = text_surf.get_rect(midleft = (self.main_rect.left + 20,bg_rect.centery))
+		self.display_surface.blit(text_surf, text_rect)
+
+		# amount
+		amount_surf = self.font.render(str(amount), False, 'Black')
+		amount_rect = amount_surf.get_rect(midright = (self.main_rect.right - 20,bg_rect.centery))
+		self.display_surface.blit(amount_surf, amount_rect)
+
+		# selected
+		if selected:
+			pygame.draw.rect(self.display_surface,'black',bg_rect,4,4)
+			if self.index <= self.sell_border: # sell
+				pos_rect = self.sell_text.get_rect(midleft = (self.main_rect.left + 150,bg_rect.centery))
+				self.display_surface.blit(self.sell_text,pos_rect)
+			else: # buy
+				pos_rect = self.buy_text.get_rect(midleft = (self.main_rect.left + 150,bg_rect.centery))
+				self.display_surface.blit(self.buy_text,pos_rect)
+
+	def update(self):
+		self.input()
+		self.display_money()
+
+		for text_index, text_surf in enumerate(self.text_surfs):
+			top = self.main_rect.top + text_index * (text_surf.get_height() + (self.padding * 2) + self.space)
+			amount_list = list(self.player.item_inventory.values()) + list(self.player.seed_inventory.values())
+			amount = amount_list[text_index]
+			self.show_entry(text_surf, amount, top, self.index == text_index)
+    </code></pre>
+
+    <h2>overlay.py</h2>
+    <pre><code>
+import pygame
+from settings import *
+
+class Overlay:
+	def __init__(self,player):
+
+		# general setup
+		self.display_surface = pygame.display.get_surface()
+		self.player = player
+
+		# imports 
+		overlay_path = '../graphics/overlay/'
+		self.tools_surf = {tool: pygame.image.load(f'{overlay_path}{tool}.png').convert_alpha() for tool in player.tools}
+		self.seeds_surf = {seed: pygame.image.load(f'{overlay_path}{seed}.png').convert_alpha() for seed in player.seeds}
+
+	def display(self):
+
+		# tool
+		tool_surf = self.tools_surf[self.player.selected_tool]
+		tool_rect = tool_surf.get_rect(midbottom = OVERLAY_POSITIONS['tool'])
+		self.display_surface.blit(tool_surf,tool_rect)
+
+		# seeds
+		seed_surf = self.seeds_surf[self.player.selected_seed]
+		seed_rect = seed_surf.get_rect(midbottom = OVERLAY_POSITIONS['seed'])
+		self.display_surface.blit(seed_surf,seed_rect)
+    </code></pre>
+
+    <h2>player.py</h2>
+    <pre><code>
+ import pygame
+from settings import *
+from support import *
+from timer import Timer
+
+class Player(pygame.sprite.Sprite):
+	def __init__(self, pos, group, collision_sprites, tree_sprites, interaction, soil_layer, toggle_shop):
+		super().__init__(group)
+
+		self.import_assets()
+		self.status = 'down_idle'
+		self.frame_index = 0
+
+		# general setup
+		self.image = self.animations[self.status][self.frame_index]
+		self.rect = self.image.get_rect(center = pos)
+		self.z = LAYERS['main']
+
+		# movement attributes
+		self.direction = pygame.math.Vector2()
+		self.pos = pygame.math.Vector2(self.rect.center)
+		self.speed = 200
+
+		# collision
+		self.hitbox = self.rect.copy().inflate((-126,-70))
+		self.collision_sprites = collision_sprites
+
+		# timers 
+		self.timers = {
+			'tool use': Timer(350,self.use_tool),
+			'tool switch': Timer(200),
+			'seed use': Timer(350,self.use_seed),
+			'seed switch': Timer(200),
+		}
+
+		# tools 
+		self.tools = ['hoe','axe','water']
+		self.tool_index = 0
+		self.selected_tool = self.tools[self.tool_index]
+
+		# seeds 
+		self.seeds = ['corn', 'tomato']
+		self.seed_index = 0
+		self.selected_seed = self.seeds[self.seed_index]
+
+		# inventory
+		self.item_inventory = {
+			'wood':   20,
+			'apple':  20,
+			'corn':   20,
+			'tomato': 20
+		}
+		self.seed_inventory = {
+		'corn': 5,
+		'tomato': 5
+		}
+		self.money = 200
+
+		# interaction
+		self.tree_sprites = tree_sprites
+		self.interaction = interaction
+		self.sleep = False
+		self.soil_layer = soil_layer
+		self.toggle_shop = toggle_shop
+
+		# sound
+		self.watering = pygame.mixer.Sound('../audio/water.mp3')
+		self.watering.set_volume(0.2)
+
+	def use_tool(self):
+		if self.selected_tool == 'hoe':
+			self.soil_layer.get_hit(self.target_pos)
+		
+		if self.selected_tool == 'axe':
+			for tree in self.tree_sprites.sprites():
+				if tree.rect.collidepoint(self.target_pos):
+					tree.damage()
+		
+		if self.selected_tool == 'water':
+			self.soil_layer.water(self.target_pos)
+			self.watering.play()
+
+	def get_target_pos(self):
+
+		self.target_pos = self.rect.center + PLAYER_TOOL_OFFSET[self.status.split('_')[0]]
+
+	def use_seed(self):
+		if self.seed_inventory[self.selected_seed] > 0:
+			self.soil_layer.plant_seed(self.target_pos, self.selected_seed)
+			self.seed_inventory[self.selected_seed] -= 1
+
+	def import_assets(self):
+		self.animations = {'up': [],'down': [],'left': [],'right': [],
+						   'right_idle':[],'left_idle':[],'up_idle':[],'down_idle':[],
+						   'right_hoe':[],'left_hoe':[],'up_hoe':[],'down_hoe':[],
+						   'right_axe':[],'left_axe':[],'up_axe':[],'down_axe':[],
+						   'right_water':[],'left_water':[],'up_water':[],'down_water':[]}
+
+		for animation in self.animations.keys():
+			full_path = '../graphics/character/' + animation
+			self.animations[animation] = import_folder(full_path)
+
+	def animate(self,dt):
+		self.frame_index += 4 * dt
+		if self.frame_index >= len(self.animations[self.status]):
+			self.frame_index = 0
+
+		self.image = self.animations[self.status][int(self.frame_index)]
+
+	def input(self):
+		keys = pygame.key.get_pressed()
+
+		if not self.timers['tool use'].active and not self.sleep:
+			# directions 
+			if keys[pygame.K_UP]:
+				self.direction.y = -1
+				self.status = 'up'
+			elif keys[pygame.K_DOWN]:
+				self.direction.y = 1
+				self.status = 'down'
+			else:
+				self.direction.y = 0
+
+			if keys[pygame.K_RIGHT]:
+				self.direction.x = 1
+				self.status = 'right'
+			elif keys[pygame.K_LEFT]:
+				self.direction.x = -1
+				self.status = 'left'
+			else:
+				self.direction.x = 0
+
+			# tool use
+			if keys[pygame.K_SPACE]:
+				self.timers['tool use'].activate()
+				self.direction = pygame.math.Vector2()
+				self.frame_index = 0
+
+			# change tool
+			if keys[pygame.K_q] and not self.timers['tool switch'].active:
+				self.timers['tool switch'].activate()
+				self.tool_index += 1
+				self.tool_index = self.tool_index if self.tool_index < len(self.tools) else 0
+				self.selected_tool = self.tools[self.tool_index]
+
+			# seed use
+			if keys[pygame.K_LCTRL]:
+				self.timers['seed use'].activate()
+				self.direction = pygame.math.Vector2()
+				self.frame_index = 0
+
+			# change seed 
+			if keys[pygame.K_e] and not self.timers['seed switch'].active:
+				self.timers['seed switch'].activate()
+				self.seed_index += 1
+				self.seed_index = self.seed_index if self.seed_index < len(self.seeds) else 0
+				self.selected_seed = self.seeds[self.seed_index]
+
+			if keys[pygame.K_RETURN]:
+				collided_interaction_sprite = pygame.sprite.spritecollide(self,self.interaction,False)
+				if collided_interaction_sprite:
+					if collided_interaction_sprite[0].name == 'Trader':
+						self.toggle_shop()
+					else:
+						self.status = 'left_idle'
+						self.sleep = True
+
+	def get_status(self):
+		
+		# idle
+		if self.direction.magnitude() == 0:
+			self.status = self.status.split('_')[0] + '_idle'
+
+		# tool use
+		if self.timers['tool use'].active:
+			self.status = self.status.split('_')[0] + '_' + self.selected_tool
+
+	def update_timers(self):
+		for timer in self.timers.values():
+			timer.update()
+
+	def collision(self, direction):
+		for sprite in self.collision_sprites.sprites():
+			if hasattr(sprite, 'hitbox'):
+				if sprite.hitbox.colliderect(self.hitbox):
+					if direction == 'horizontal':
+						if self.direction.x > 0: # moving right
+							self.hitbox.right = sprite.hitbox.left
+						if self.direction.x < 0: # moving left
+							self.hitbox.left = sprite.hitbox.right
+						self.rect.centerx = self.hitbox.centerx
+						self.pos.x = self.hitbox.centerx
+
+					if direction == 'vertical':
+						if self.direction.y > 0: # moving down
+							self.hitbox.bottom = sprite.hitbox.top
+						if self.direction.y < 0: # moving up
+							self.hitbox.top = sprite.hitbox.bottom
+						self.rect.centery = self.hitbox.centery
+						self.pos.y = self.hitbox.centery
+
+	def move(self,dt):
+
+		# normalizing a vector 
+		if self.direction.magnitude() > 0:
+			self.direction = self.direction.normalize()
+
+		# horizontal movement
+		self.pos.x += self.direction.x * self.speed * dt
+		self.hitbox.centerx = round(self.pos.x)
+		self.rect.centerx = self.hitbox.centerx
+		self.collision('horizontal')
+
+		# vertical movement
+		self.pos.y += self.direction.y * self.speed * dt
+		self.hitbox.centery = round(self.pos.y)
+		self.rect.centery = self.hitbox.centery
+		self.collision('vertical')
+
+	def update(self, dt):
+		self.input()
+		self.get_status()
+		self.update_timers()
+		self.get_target_pos()
+
+		self.move(dt)
+		self.animate(dt)
+    </code></pre>
+
+    <h2>settings.py</h2>
+    <pre><code>
+from pygame.math import Vector2
+# screen
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
+TILE_SIZE = 64
+
+# overlay positions 
+OVERLAY_POSITIONS = {
+	'tool' : (40, SCREEN_HEIGHT - 15), 
+	'seed': (70, SCREEN_HEIGHT - 5)}
+
+PLAYER_TOOL_OFFSET = {
+	'left': Vector2(-50,40),
+	'right': Vector2(50,40),
+	'up': Vector2(0,-10),
+	'down': Vector2(0,50)
+}
+
+LAYERS = {
+	'water': 0,
+	'ground': 1,
+	'soil': 2,
+	'soil water': 3,
+	'rain floor': 4,
+	'house bottom': 5,
+	'ground plant': 6,
+	'main': 7,
+	'house top': 8,
+	'fruit': 9,
+	'rain drops': 10
+}
+
+APPLE_POS = {
+	'Small': [(18,17), (30,37), (12,50), (30,45), (20,30), (30,10)],
+	'Large': [(30,24), (60,65), (50,50), (16,40),(45,50), (42,70)]
+}
+
+GROW_SPEED = {
+	'corn': 1,
+	'tomato': 0.7
+}
+
+SALE_PRICES = {
+	'wood': 4,
+	'apple': 2,
+	'corn': 10,
+	'tomato': 20
+}
+PURCHASE_PRICES = {
+	'corn': 4,
+	'tomato': 5
+}
+    </code></pre>
+
+    <h2>sky.py</h2>
+    <pre><code>
+import pygame 
+from settings import *
+from support import import_folder
+from sprites import Generic
+from random import randint, choice
+
+class Sky:
+	def __init__(self):
+		self.display_surface = pygame.display.get_surface()
+		self.full_surf = pygame.Surface((SCREEN_WIDTH,SCREEN_HEIGHT))
+		self.start_color = [255,255,255]
+		self.end_color = (38,101,189)
+
+	def display(self, dt):
+		for index, value in enumerate(self.end_color):
+			if self.start_color[index] > value:
+				self.start_color[index] -= 2 * dt
+
+		self.full_surf.fill(self.start_color)
+		self.display_surface.blit(self.full_surf, (0,0), special_flags = pygame.BLEND_RGBA_MULT)
+
+class Drop(Generic):
+	def __init__(self, surf, pos, moving, groups, z):
+		
+		# general setup
+		super().__init__(pos, surf, groups, z)
+		self.lifetime = randint(400,500)
+		self.start_time = pygame.time.get_ticks()
+
+		# moving 
+		self.moving = moving
+		if self.moving:
+			self.pos = pygame.math.Vector2(self.rect.topleft)
+			self.direction = pygame.math.Vector2(-2,4)
+			self.speed = randint(200,250)
+
+	def update(self,dt):
+		# movement
+		if self.moving:
+			self.pos += self.direction * self.speed * dt
+			self.rect.topleft = (round(self.pos.x), round(self.pos.y))
+
+		# timer
+		if pygame.time.get_ticks() - self.start_time >= self.lifetime:
+			self.kill()
+
+class Rain:
+	def __init__(self, all_sprites):
+		self.all_sprites = all_sprites
+		self.rain_drops = import_folder('../graphics/rain/drops/')
+		self.rain_floor = import_folder('../graphics/rain/floor/')
+		self.floor_w, self.floor_h =  pygame.image.load('../graphics/world/ground.png').get_size()
+
+	def create_floor(self):
+		Drop(
+			surf = choice(self.rain_floor), 
+			pos = (randint(0,self.floor_w),randint(0,self.floor_h)), 
+			moving = False, 
+			groups = self.all_sprites, 
+			z = LAYERS['rain floor'])
+
+	def create_drops(self):
+		Drop(
+			surf = choice(self.rain_drops), 
+			pos = (randint(0,self.floor_w),randint(0,self.floor_h)), 
+			moving = True, 
+			groups = self.all_sprites, 
+			z = LAYERS['rain drops'])
+
+	def update(self):
+		self.create_floor()
+		self.create_drops()
+    </code></pre>
+
+    <h2>soil.py</h2>
+    <pre><code>
+import pygame
+from settings import *
+from pytmx.util_pygame import load_pygame
+from support import *
+from random import choice
+
+class SoilTile(pygame.sprite.Sprite):
+	def __init__(self, pos, surf, groups):
+		super().__init__(groups)
+		self.image = surf
+		self.rect = self.image.get_rect(topleft = pos)
+		self.z = LAYERS['soil']
+
+class WaterTile(pygame.sprite.Sprite):
+	def __init__(self, pos, surf, groups):
+		super().__init__(groups)
+		self.image = surf
+		self.rect = self.image.get_rect(topleft = pos)
+		self.z = LAYERS['soil water']
+
+class Plant(pygame.sprite.Sprite):
+	def __init__(self, plant_type, groups, soil, check_watered):
+		super().__init__(groups)
+		
+		# setup
+		self.plant_type = plant_type
+		self.frames = import_folder(f'../graphics/fruit/{plant_type}')
+		self.soil = soil
+		self.check_watered = check_watered
+
+		# plant growing 
+		self.age = 0
+		self.max_age = len(self.frames) - 1
+		self.grow_speed = GROW_SPEED[plant_type]
+		self.harvestable = False
+
+		# sprite setup
+		self.image = self.frames[self.age]
+		self.y_offset = -16 if plant_type == 'corn' else -8
+		self.rect = self.image.get_rect(midbottom = soil.rect.midbottom + pygame.math.Vector2(0,self.y_offset))
+		self.z = LAYERS['ground plant']
+
+	def grow(self):
+		if self.check_watered(self.rect.center):
+			self.age += self.grow_speed
+
+			if int(self.age) > 0:
+				self.z = LAYERS['main']
+				self.hitbox = self.rect.copy().inflate(-26,-self.rect.height * 0.4)
+
+			if self.age >= self.max_age:
+				self.age = self.max_age
+				self.harvestable = True
+
+			self.image = self.frames[int(self.age)]
+			self.rect = self.image.get_rect(midbottom = self.soil.rect.midbottom + pygame.math.Vector2(0,self.y_offset))
+
+class SoilLayer:
+	def __init__(self, all_sprites, collision_sprites):
+
+		# sprite groups
+		self.all_sprites = all_sprites
+		self.collision_sprites = collision_sprites
+		self.soil_sprites = pygame.sprite.Group()
+		self.water_sprites = pygame.sprite.Group()
+		self.plant_sprites = pygame.sprite.Group()
+
+		# graphics
+		self.soil_surfs = import_folder_dict('../graphics/soil/')
+		self.water_surfs = import_folder('../graphics/soil_water')
+
+		self.create_soil_grid()
+		self.create_hit_rects()
+
+		# sounds
+		self.hoe_sound = pygame.mixer.Sound('../audio/hoe.wav')
+		self.hoe_sound.set_volume(0.1)
+
+		self.plant_sound = pygame.mixer.Sound('../audio/plant.wav') 
+		self.plant_sound.set_volume(0.2)
+
+	def create_soil_grid(self):
+		ground = pygame.image.load('../graphics/world/ground.png')
+		h_tiles, v_tiles = ground.get_width() // TILE_SIZE, ground.get_height() // TILE_SIZE
+		
+		self.grid = [[[] for col in range(h_tiles)] for row in range(v_tiles)]
+		for x, y, _ in load_pygame('../data/map.tmx').get_layer_by_name('Farmable').tiles():
+			self.grid[y][x].append('F')
+
+	def create_hit_rects(self):
+		self.hit_rects = []
+		for index_row, row in enumerate(self.grid):
+			for index_col, cell in enumerate(row):
+				if 'F' in cell:
+					x = index_col * TILE_SIZE
+					y = index_row * TILE_SIZE
+					rect = pygame.Rect(x,y,TILE_SIZE, TILE_SIZE)
+					self.hit_rects.append(rect)
+
+	def get_hit(self, point):
+		for rect in self.hit_rects:
+			if rect.collidepoint(point):
+				self.hoe_sound.play()
+
+				x = rect.x // TILE_SIZE
+				y = rect.y // TILE_SIZE
+
+				if 'F' in self.grid[y][x]:
+					self.grid[y][x].append('X')
+					self.create_soil_tiles()
+					if self.raining:
+						self.water_all()
+
+	def water(self, target_pos):
+		for soil_sprite in self.soil_sprites.sprites():
+			if soil_sprite.rect.collidepoint(target_pos):
+
+				x = soil_sprite.rect.x // TILE_SIZE
+				y = soil_sprite.rect.y // TILE_SIZE
+				self.grid[y][x].append('W')
+
+				pos = soil_sprite.rect.topleft
+				surf = choice(self.water_surfs)
+				WaterTile(pos, surf, [self.all_sprites, self.water_sprites])
+
+	def water_all(self):
+		for index_row, row in enumerate(self.grid):
+			for index_col, cell in enumerate(row):
+				if 'X' in cell and 'W' not in cell:
+					cell.append('W')
+					x = index_col * TILE_SIZE
+					y = index_row * TILE_SIZE
+					WaterTile((x,y), choice(self.water_surfs), [self.all_sprites, self.water_sprites])
+
+	def remove_water(self):
+
+		# destroy all water sprites
+		for sprite in self.water_sprites.sprites():
+			sprite.kill()
+
+		# clean up the grid
+		for row in self.grid:
+			for cell in row:
+				if 'W' in cell:
+					cell.remove('W')
+
+	def check_watered(self, pos):
+		x = pos[0] // TILE_SIZE
+		y = pos[1] // TILE_SIZE
+		cell = self.grid[y][x]
+		is_watered = 'W' in cell
+		return is_watered
+
+	def plant_seed(self, target_pos, seed):
+		for soil_sprite in self.soil_sprites.sprites():
+			if soil_sprite.rect.collidepoint(target_pos):
+				self.plant_sound.play()
+
+				x = soil_sprite.rect.x // TILE_SIZE
+				y = soil_sprite.rect.y // TILE_SIZE
+
+				if 'P' not in self.grid[y][x]:
+					self.grid[y][x].append('P')
+					Plant(seed, [self.all_sprites, self.plant_sprites, self.collision_sprites], soil_sprite, self.check_watered)
+
+	def update_plants(self):
+		for plant in self.plant_sprites.sprites():
+			plant.grow()
+
+	def create_soil_tiles(self):
+		self.soil_sprites.empty()
+		for index_row, row in enumerate(self.grid):
+			for index_col, cell in enumerate(row):
+				if 'X' in cell:
+					
+					# tile options 
+					t = 'X' in self.grid[index_row - 1][index_col]
+					b = 'X' in self.grid[index_row + 1][index_col]
+					r = 'X' in row[index_col + 1]
+					l = 'X' in row[index_col - 1]
+
+					tile_type = 'o'
+
+					# all sides
+					if all((t,r,b,l)): tile_type = 'x'
+
+					# horizontal tiles only
+					if l and not any((t,r,b)): tile_type = 'r'
+					if r and not any((t,l,b)): tile_type = 'l'
+					if r and l and not any((t,b)): tile_type = 'lr'
+
+					# vertical only 
+					if t and not any((r,l,b)): tile_type = 'b'
+					if b and not any((r,l,t)): tile_type = 't'
+					if b and t and not any((r,l)): tile_type = 'tb'
+
+					# corners 
+					if l and b and not any((t,r)): tile_type = 'tr'
+					if r and b and not any((t,l)): tile_type = 'tl'
+					if l and t and not any((b,r)): tile_type = 'br'
+					if r and t and not any((b,l)): tile_type = 'bl'
+
+					# T shapes
+					if all((t,b,r)) and not l: tile_type = 'tbr'
+					if all((t,b,l)) and not r: tile_type = 'tbl'
+					if all((l,r,t)) and not b: tile_type = 'lrb'
+					if all((l,r,b)) and not t: tile_type = 'lrt'
+
+					SoilTile(
+						pos = (index_col * TILE_SIZE,index_row * TILE_SIZE), 
+						surf = self.soil_surfs[tile_type], 
+						groups = [self.all_sprites, self.soil_sprites])
+    </code></pre>
+    <h2>sprites.py</h2>
+    <pre><code>
+import pygame
+from settings import *
+from random import randint, choice
+from timer import Timer
+
+class Generic(pygame.sprite.Sprite):
+	def __init__(self, pos, surf, groups, z = LAYERS['main']):
+		super().__init__(groups)
+		self.image = surf
+		self.rect = self.image.get_rect(topleft = pos)
+		self.z = z
+		self.hitbox = self.rect.copy().inflate(-self.rect.width * 0.2, -self.rect.height * 0.75)
+
+class Interaction(Generic):
+	def __init__(self, pos, size, groups, name):
+		surf = pygame.Surface(size)
+		super().__init__(pos, surf, groups)
+		self.name = name
+
+class Water(Generic):
+	def __init__(self, pos, frames, groups):
+
+		#animation setup
+		self.frames = frames
+		self.frame_index = 0
+
+		# sprite setup
+		super().__init__(
+				pos = pos, 
+				surf = self.frames[self.frame_index], 
+				groups = groups, 
+				z = LAYERS['water']) 
+
+	def animate(self,dt):
+		self.frame_index += 5 * dt
+		if self.frame_index >= len(self.frames):
+			self.frame_index = 0
+		self.image = self.frames[int(self.frame_index)]
+
+	def update(self,dt):
+		self.animate(dt)
+
+class WildFlower(Generic):
+	def __init__(self, pos, surf, groups):
+		super().__init__(pos, surf, groups)
+		self.hitbox = self.rect.copy().inflate(-20,-self.rect.height * 0.9)
+
+class Particle(Generic):
+	def __init__(self, pos, surf, groups, z, duration = 200):
+		super().__init__(pos, surf, groups, z)
+		self.start_time = pygame.time.get_ticks()
+		self.duration = duration
+
+		# white surface 
+		mask_surf = pygame.mask.from_surface(self.image)
+		new_surf = mask_surf.to_surface()
+		new_surf.set_colorkey((0,0,0))
+		self.image = new_surf
+
+	def update(self,dt):
+		current_time = pygame.time.get_ticks()
+		if current_time - self.start_time > self.duration:
+			self.kill()
+
+class Tree(Generic):
+	def __init__(self, pos, surf, groups, name, player_add):
+		super().__init__(pos, surf, groups)
+
+		# tree attributes
+		self.health = 5
+		self.alive = True
+		stump_path = f'../graphics/stumps/{"small" if name == "Small" else "large"}.png'
+		self.stump_surf = pygame.image.load(stump_path).convert_alpha()
+
+		# apples
+		self.apple_surf = pygame.image.load('../graphics/fruit/apple.png')
+		self.apple_pos = APPLE_POS[name]
+		self.apple_sprites = pygame.sprite.Group()
+		self.create_fruit()
+
+		self.player_add = player_add
+
+		# sounds
+		self.axe_sound = pygame.mixer.Sound('../audio/axe.mp3')
+
+	def damage(self):
+		
+		# damaging the tree
+		self.health -= 1
+
+		# play sound
+		self.axe_sound.play()
+
+		# remove an apple
+		if len(self.apple_sprites.sprites()) > 0:
+			random_apple = choice(self.apple_sprites.sprites())
+			Particle(
+				pos = random_apple.rect.topleft,
+				surf = random_apple.image, 
+				groups = self.groups()[0], 
+				z = LAYERS['fruit'])
+			self.player_add('apple')
+			random_apple.kill()
+
+	def check_death(self):
+		if self.health <= 0:
+			Particle(self.rect.topleft, self.image, self.groups()[0], LAYERS['fruit'], 300)
+			self.image = self.stump_surf
+			self.rect = self.image.get_rect(midbottom = self.rect.midbottom)
+			self.hitbox = self.rect.copy().inflate(-10,-self.rect.height * 0.6)
+			self.alive = False
+			self.player_add('wood')
+
+	def update(self,dt):
+		if self.alive:
+			self.check_death()
+
+	def create_fruit(self):
+		for pos in self.apple_pos:
+			if randint(0,10) < 2:
+				x = pos[0] + self.rect.left
+				y = pos[1] + self.rect.top
+				Generic(
+					pos = (x,y), 
+					surf = self.apple_surf, 
+					groups = [self.apple_sprites,self.groups()[0]],
+					z = LAYERS['fruit'])
+    </code></pre>
+    
+    <h2>support.py</h2>
+    <pre><code>
+from os import walk
+import pygame
+
+def import_folder(path):
+	surface_list = []
+
+	for _, __, img_files in walk(path):
+		for image in img_files:
+			full_path = path + '/' + image
+			image_surf = pygame.image.load(full_path).convert_alpha()
+			surface_list.append(image_surf)
+
+	return surface_list
+
+def import_folder_dict(path):
+	surface_dict = {}
+
+	for _, __, img_files in walk(path):
+		for image in img_files:
+			full_path = path + '/' + image
+			image_surf = pygame.image.load(full_path).convert_alpha()
+			surface_dict[image.split('.')[0]] = image_surf
+
+	return surface_dict
+    </code></pre>
+
+    <h2>timer.py</h2>
+    <pre><code>
+import pygame 
+
+class Timer:
+	def __init__(self,duration,func = None):
+		self.duration = duration
+		self.func = func
+		self.start_time = 0
+		self.active = False
+
+	def activate(self):
+		self.active = True
+		self.start_time = pygame.time.get_ticks()
+
+	def deactivate(self):
+		self.active = False
+		self.start_time = 0
+
+	def update(self):
+		current_time = pygame.time.get_ticks()
+		if current_time - self.start_time >= self.duration:
+			if self.func and self.start_time != 0:
+				self.func()
+			self.deactivate()
+    </code></pre>
+
+    <h2>transition.py</h2>
+    <pre><code>
+import pygame
+from settings import *
+
+class Transition:
+	def __init__(self, reset, player):
+		
+		# setup
+		self.display_surface = pygame.display.get_surface()
+		self.reset = reset
+		self.player = player
+
+		# overlay image
+		self.image = pygame.Surface((SCREEN_WIDTH,SCREEN_HEIGHT))
+		self.color = 255
+		self.speed = -2
+
+	def play(self):
+		self.color += self.speed
+		if self.color <= 0:
+			self.speed *= -1
+			self.color = 0
+			self.reset()
+		if self.color > 255:
+			self.color = 255
+			self.player.sleep = False
+			self.speed = -2
+
+		self.image.fill((self.color,self.color,self.color))
+		self.display_surface.blit(self.image, (0,0), special_flags = pygame.BLEND_RGBA_MULT)
+    </code></pre>
+
+    <h2>main.py</h2>
+    <pre><code>
+import pygame, sys
+from settings import *
+from level import Level
+
+class Game:
+	def __init__(self):
+		pygame.init()
+		self.screen = pygame.display.set_mode((SCREEN_WIDTH,SCREEN_HEIGHT))
+		pygame.display.set_caption('Sprout land')
+		self.clock = pygame.time.Clock()
+		self.level = Level()
+
+	def run(self):
+		while True:
+			for event in pygame.event.get():
+				if event.type == pygame.QUIT:
+					pygame.quit()
+					sys.exit()
+  
+			dt = self.clock.tick() / 1000
+			self.level.run(dt)
+			pygame.display.update()
+
+if __name__ == '__main__':
+	game = Game()
+	game.run()
+    </code></pre>
+    <a href="https://drive.google.com/drive/folders/16zuDc5FKFvMA2dG-hCkWQmoQFj5DMsdh?usp=drive_link"><h1 class="source">Asset & Source Code</h1></a>
+    <a href="https://coder-hoang.github.io/website/"><h1 class="source">Main Website</h1></a>
+    <a href="../../index.html"><h1 class="source">Pygame Website</h1></a>
+-->
+</body>
+</html>
